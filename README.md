@@ -10,4 +10,4 @@ También se realiza una una estiamción ascendente, que utiliza el enfoque de la
 
 ### Evolución del crecimiento del producto real, proyección a un período y bandas de confianza
 
-!()[graficos/gird_fanplot_sectores.]
+![](graficos/gird_fanplot_sectores.png)
