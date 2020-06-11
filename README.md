@@ -8,6 +8,11 @@ por parte, cuya incertidumbre procede de la mediana histórica del error de pron
 
 También se realiza una una estiamción ascendente, que utiliza el enfoque de la producción para agregar los errores individuales según el peso de cada sector y obtener la proyección de densidad del producto, permitiendo una descomposición del crecimiento estimado y del error de pronóstico histórico a cada horizonte.
 
-### Evolución del crecimiento del producto real, proyección a un período y bandas de confianza
+### Forecast del crecimiento real 2020-2022
+![](graficos/fanplot_agregacion.PNG)
 
+### Forecast ajustado por el efecto negativo del COVID-19
+![](graficos/fanplot_dummy.PNG)
+
+### Forecast del crecimiento real de los distintos sectores
 ![](graficos/grid_fanplot_sectores.png)
