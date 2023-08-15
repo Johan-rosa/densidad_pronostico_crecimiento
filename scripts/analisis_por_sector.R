@@ -16,8 +16,6 @@ source("scripts/funciones.R")
 # detalles de los sectores (Al final esto)
 detalles_sectores <- read_excel("data/detalles_sectores.xlsx")
 
-# obteniendo la data por sectore
-
 pib_sectores <- get_pib_sectores(
     modalidad = "real",
     acumulado = FALSE,
@@ -31,16 +29,12 @@ pib_sectores <- get_pib_sectores(
     ) %>% 
     ungroup()
 
-#agregando detalles de los sectores
 pib_sectores <- pib_sectores %>%
     left_join(detalles_sectores)
 
-
-# agregando la columnna con la tasa de crecimiento
 pib_sectores_sample <- pib_sectores |>
     filter(year <= 2017)
 
-# agregando la columnna con la tasa de crecimiento
 pib_sectores_outsample <- pib_sectores |>
     filter(fecha > "2017-09-01", year < 2020)
 
@@ -143,7 +137,6 @@ errores_agregados <- agrega_errores(
   `[[` ("Error agregado") %>% 
   as_tibble() %>% setNames("error") %>% 
   rowid_to_column(var = "horizonte")
-
 
 # agregación de pronostico sectorial
 suppressWarnings(
