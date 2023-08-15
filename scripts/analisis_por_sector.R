@@ -17,26 +17,37 @@ source("scripts/funciones.R")
 detalles_sectores <- read_excel("data/detalles_sectores.xlsx")
 
 # obteniendo la data por sectore
-pib_sectores <- get_pib_sectores(modalidad = "real", acumulado = FALSE, homogenea_91 = TRUE)
 
-# agregando la columnna con la tasa de crecimiento
-pib_sectores <- pib_sectores %>% 
-  ungroup() %>% 
-  group_by(sector) %>% 
-  mutate(
-    crecimiento = (pib_2007/dplyr::lag(pib_2007, 4)) - 1,
-    crecimiento = crecimiento * 100
-  ) %>% 
-  ungroup()
+pib_sectores <- get_pib_sectores(
+    modalidad = "real",
+    acumulado = FALSE,
+    homogenea_91 = TRUE
+) |>
+    group_by(sector) %>% 
+    mutate(
+        crecimiento = (pib_2007 / dplyr::lag(pib_2007, 4)) - 1,
+        crecimiento = crecimiento * 100,
+        recesion = as.numeric(crecimiento <= 0)
+    ) %>% 
+    ungroup()
 
 #agregando detalles de los sectores
 pib_sectores <- pib_sectores %>%
-  left_join(detalles_sectores)
+    left_join(detalles_sectores)
+
+
+# agregando la columnna con la tasa de crecimiento
+pib_sectores_sample <- pib_sectores |>
+    filter(year <= 2017)
+
+# agregando la columnna con la tasa de crecimiento
+pib_sectores_outsample <- pib_sectores |>
+    filter(fecha > "2017-09-01", year < 2020)
 
 # Modeling --- -------------------------------------------------------------
 
 # Objeto anidado con data sectorial 
-by_sectores <- pib_sectores %>% 
+by_sectores <- pib_sectores_sample %>% 
   dplyr::filter(agregacion %in% c("sector", "pib", "impuestos")) %>% 
   select(fecha, year, trimestre, sector, pib_2007, crecimiento) %>% 
   group_by(sector) %>% 
@@ -48,7 +59,7 @@ by_sectores <- by_sectores %>%
     # Objeto ts ---- ---- ---- ---
     ts = map(
       data, 
-      ~.x %>%
+      ~ .x %>%
         select(crecimiento) %>% 
         ts(start = c(1991, 1), frequency = 4)
     ),
@@ -57,7 +68,7 @@ by_sectores <- by_sectores %>%
     model = map(
       ts,
       auto.arima,
-      seasonal = TRUE
+      seasonal = TRUE 
     ),
     
     # Forecast --- --- --- --- 
@@ -115,10 +126,10 @@ fanplots_sectores <- pmap(
 # Pesos por sector
 pesos_w <- tribble(
   ~sector, ~pesos,
-  "Agropecuario", 5.2985682/100,
-  "Industrias", 28.46100381743/100,
-  "Servicios", 58.8893220381438/100,
-  "Impuestos a la producción netos de subsidios", 7.35110592000/100)
+  "Agropecuario", 5.2985682 / 100,
+  "Industrias", 28.46100381743 / 100,
+  "Servicios", 58.8893220381438 / 100,
+  "Impuestos a la producción netos de subsidios", 7.35110592000 / 100)
 
 # agregacion de los errores sectoriales
 errores_rmse_sectores <- by_sectores$errores_rmse %>% map("Hitorico errores")
@@ -149,12 +160,10 @@ suppressWarnings(
 )
 
 # Modelo del PIB con variable dummy para recesión ----
-
 pib_dummy_ts <- pib_sectores %>%
   dplyr::filter(agregacion == "pib") %>% 
-  select(fecha, crecimiento) %>% 
-  mutate(recesion = as.numeric(crecimiento <= 0)) %>% 
-  slice(-(1:4)) %>% 
+  select(fecha, crecimiento, recesion) %>% 
+  filter(!is.na(crecimiento)) |> 
   select(crecimiento, recesion) %>% 
   ts(start = c(1992, 1), frequency = 4)
 
@@ -205,7 +214,7 @@ distribucion_agregado <- purrr::map2(
   mutate(horizonte = parse_number(horizonte),
          origen = "Por agregación")
 
-comparacion_densidad_pronostico <-  bind_rows(
+(comparacion_densidad_pronostico <-  bind_rows(
   distribucion_agregado,
   distribucion_general
 ) %>% 
@@ -215,7 +224,7 @@ comparacion_densidad_pronostico <-  bind_rows(
   scale_fill_manual(values = c("gray61", "gray22")) +
   labs(x = "Crecimiento", y = "Horizonte de pronóstico", fill = "Metodología") +
   theme_plex() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom"))
 
 
 # Comparación de los errores históricos de los modelos
@@ -232,8 +241,9 @@ by_sectores[["errores_rmse"]][[5]]$`Hitorico errores` %>%
 
 # Gráficos del pib por sectores
 
-p_pib_sectores <-  pib_sectores %>% 
-  dplyr::filter(agregacion %in% c("sector", "pib", "impuestos")) %>% 
+(p_pib_sectores <-  pib_sectores %>% 
+  dplyr::filter(agregacion %in% c("sector", "pib"#, "impuestos"
+                                  )) %>% 
   mutate(sector = fct_inorder(sector)) %>% 
   ggplot(aes(x = fecha, y = crecimiento)) +
   geom_line(size = 1) +
@@ -247,29 +257,37 @@ p_pib_sectores <-  pib_sectores %>%
   labs(
     x = NULL,
     y = "Crecimiento interanual"
-  )
-
+  ))
 
 # Fanplots de los sectores -----------------
 
 # Famplot Sector Agropecuario
-fanplot_agropecuario <- fanplots_sectores[[1]] +
-  scale_linetype(labels = c("Mediana", "50%", '90%')) +
-  theme_minimal() +
-  scale_fill_gradient(low = "gray19", high = "gray87") +
-  labs(
-    title = "Agropecuario",
-    x = NULL,
-    y = "Crecimiento Interanual",
-    fill = "",
-    linetype = "Intervalos"
-  ) +
-  theme(
-    legend.position = "bottom"
-  )
+(fanplot_agropecuario <- fanplots_sectores[[1]] +
+     geom_line(
+         data = filter(pib_sectores_outsample, sector == "Agropecuario"),
+         aes(x = fecha, y = crecimiento),
+         color = "red"
+         ) +
+     scale_linetype(labels = c("Mediana", "50%", '90%')) +
+     theme_minimal() +
+     scale_fill_gradient(low = "gray19", high = "gray87") +
+     labs(
+       title = "Agropecuario",
+       x = NULL,
+       y = "Crecimiento Interanual",
+       fill = "",
+       linetype = "Intervalos"
+     ) +
+     theme(legend.position = "bottom")
+ )
 
 # Fanplot Industrias
-fanplot_industrias <- fanplots_sectores[[2]] +
+(fanplot_industrias <- fanplots_sectores[[2]] +
+        geom_line(
+            data = filter(pib_sectores_outsample, sector == "Industrias"),
+            aes(x = fecha, y = crecimiento),
+            color = "red"
+        ) +
   scale_linetype(labels = c("Mediana", "50%", '90%')) +
   theme_minimal() +
   scale_fill_gradient(low = "gray19", high = "gray87") +
@@ -282,11 +300,16 @@ fanplot_industrias <- fanplots_sectores[[2]] +
   ) +
   theme(
     legend.position = "bottom"
-  )
+  ))
 
 # Fanplot Servicio
-fanplot_servicios <- fanplots_sectores[[3]] +
+(fanplot_servicios <- fanplots_sectores[[3]] +
   scale_linetype(labels = c("Mediana", "50%", '90%')) +
+        geom_line(
+            data = filter(pib_sectores_outsample, sector == "Servicios"),
+            aes(x = fecha, y = crecimiento),
+            color = "red"
+        ) +
   theme_minimal() +
   scale_fill_gradient(low = "gray19", high = "gray87") +
   labs(
@@ -298,10 +321,15 @@ fanplot_servicios <- fanplots_sectores[[3]] +
   ) +
   theme(
     legend.position = "bottom"
-  )
+  ))
 
 # Fanplot PIB
-fanplot_impuestos <- fanplots_sectores[[4]] +
+(fanplot_impuestos <- fanplots_sectores[[4]] +
+        geom_line(
+            data = filter(pib_sectores_outsample, str_detect(sector, "^Impuestos")),
+            aes(x = fecha, y = crecimiento),
+            color = "red"
+        ) +
   scale_linetype(labels = c("Mediana", "50%", '90%')) +
   theme_minimal() +
   scale_fill_gradient(low = "gray19", high = "gray87") +
@@ -314,35 +342,39 @@ fanplot_impuestos <- fanplots_sectores[[4]] +
   ) +
   theme(
     legend.position = "bottom"
-  )
+  ))
 
 # Grid de fanplots sectores
-grid_fanplot_sectores <- (fanplot_agropecuario + fanplot_industrias +
-                            fanplot_servicios + fanplot_impuestos) +
-  plot_layout(guides = "collect") & theme(legend.position = 'bottom')
+(grid_fanplot_sectores <- (
+    fanplot_agropecuario +
+    fanplot_industrias +
+    fanplot_servicios + 
+    fanplot_impuestos
+    ) +
+    plot_layout(guides = "collect") & theme(legend.position = 'bottom'))
 
 
 # Gráfcio del forecast de los sectores  (No se incluye en el trabajo)
-p_forecast_sectores <- (by_sectores %>% 
-                          dplyr::filter(str_detect(sector, "Producto", negate = TRUE)) %>% 
-                          unnest(sweep) %>% 
-                          ungroup() %>% 
-                          mutate(sector = fct_inorder(sector)) %>% 
-                          dplyr::filter(fecha > 2006.75) %>% 
-                          ggplot(aes(x = fecha, y = crecimiento, linetype = key)) +
-                          facet_wrap(~sector, scales = "free") +
-                          theme_plex() +
-                          geom_ribbon(aes(x = fecha, ymax = hi.95, ymin = lo.95),
-                                      alpha = 0.5) +
-                          geom_ribbon(aes(x = fecha, ymax = hi.80, ymin = lo.80),
-                                      alpha = 0.5) +
-                          geom_line(size = 1) +
-                          theme(
-                            strip.text = element_text(face = "bold"),
-                            axis.title = element_text(face = "bold"),
-                            axis.line.x = element_line(color = "black"),
-                            legend.position = "none"
-                          ) )
+(p_forecast_sectores <-
+    by_sectores %>%
+        dplyr::filter(str_detect(sector, "Producto", negate = TRUE)) %>% 
+        unnest(sweep) %>% 
+        ungroup() %>% 
+        mutate(sector = fct_inorder(sector)) %>% 
+        dplyr::filter(fecha > 2006.75) %>% 
+        ggplot(aes(x = fecha, y = crecimiento, linetype = key)) +
+        facet_wrap(~sector, scales = "free") +
+        theme_plex() +
+        geom_ribbon(aes(x = fecha, ymax = hi.95, ymin = lo.95),
+        alpha = 0.5) +
+        geom_ribbon(aes(x = fecha, ymax = hi.80, ymin = lo.80), alpha = 0.5) +
+        geom_line(size = 1) +
+        theme(
+            strip.text = element_text(face = "bold"),
+            axis.title = element_text(face = "bold"),
+            axis.line.x = element_line(color = "black"),
+            legend.position = "none")
+    )
 
 # Análisis de los residuos de los modelos individuales -----
 
@@ -373,10 +405,15 @@ residual_hist <- cowplot::plot_grid(plotlist = residual_dist[1:4])
 
 # Fanplot del pronóstico agregado ----
 
-fanplot_agregacion <- fanplot_density(
+(fanplot_agregacion <- fanplot_density(
   serie = by_sectores[5,][["ts"]][[1]],
   fcast_values = mean_agregado$pib,
   step_error = mean_agregado$error) +
+     geom_line(
+         data = filter(pib_sectores_outsample, str_detect(sector, "^Producto")),
+         aes(x = fecha, y = crecimiento),
+         color = "red"
+     ) +
   scale_linetype(labels = c("Mediana", "50%", '90%')) +
   theme_minimal() +
   scale_fill_gradient(low = "gray19", high = "gray87") +
@@ -387,12 +424,12 @@ fanplot_agregacion <- fanplot_density(
     fill = "",
     linetype = "Intervalos"
   ) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom"))
 
 # Gráficos del modelo del PIB con Dummys
 
 # Gráfico del forecast modelo con dummy
-plot_fcast_dummy <- data_fcast_dummy %>% 
+(plot_fcast_dummy <- data_fcast_dummy %>% 
   dplyr::filter(index > 2006.75) %>% 
   ggplot(aes(x = index)) +
   geom_ribbon(aes(ymin = lo.95, ymax = hi.95, fill = "95")) +
@@ -409,7 +446,7 @@ plot_fcast_dummy <- data_fcast_dummy %>%
     fill = "Intervalos",
     linetype = "Intervalos"
   ) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom"))
 
 
 # Fanplot modelo con dummy de recesión -----
@@ -420,7 +457,7 @@ errores_dummy_model <- error_historico_d1(
   n.valid = 8
 )
 
-fanplot_dummy <- fanplot_density(pib_dummy_ts[,"crecimiento"], 
+(fanplot_dummy <- fanplot_density(pib_dummy_ts[,"crecimiento"], 
                                  fcast_values = fcast_dummy$mean, 
                                  simulation_size = 500,
                                  step_error = errores_dummy_model$`Errores agregados`) +
@@ -435,7 +472,7 @@ fanplot_dummy <- fanplot_density(pib_dummy_ts[,"crecimiento"],
     fill = "",
     linetype = "Intervalos"
   ) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom"))
 
 # Guardar visualizaciones --- ----------------------------------------------
 
