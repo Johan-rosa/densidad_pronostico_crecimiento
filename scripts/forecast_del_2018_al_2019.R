@@ -5,6 +5,7 @@ library(zoo)
 library(timetk)
 library(sweep)
 library(readxl)
+library(patchwork)
 
 # funciones creadas para el trabajo --- -----------------------------------
 source("scripts/funciones.R")
@@ -151,10 +152,10 @@ fanplot_with_series <- function(fanplot_list, sector_to_plot) {
   fanplot_list[[sector_to_plot]] +
     geom_line(
       data = filter(pib_sectores_outsample, sector == sector_to_plot),
-      aes(x = fecha, y = crecimiento),
-      color = "red"
+      aes(x = fecha, y = crecimiento, color = "observado"),
     ) +
-    scale_linetype(labels = c("Mediana", "50%", '90%')) +
+    scale_linetype(name = "", labels = c("Mediana", "50%", '90%')) +
+    scale_color_manual(name = "", values = c("Red")) +
     theme_minimal() +
     scale_fill_gradient(low = "gray19", high = "gray87") +
     scale_x_date(breaks = scales::pretty_breaks(6)) +
@@ -162,8 +163,9 @@ fanplot_with_series <- function(fanplot_list, sector_to_plot) {
       title = sector_to_plot,
       x = NULL,
       y = "Crecimiento Interanual",
-      fill = "",
-      linetype = "Intervalos"
+      fill = NULL,
+      linetype = NULL,
+      color = NULL
     ) +
     theme(legend.position = "bottom")
 }
@@ -171,33 +173,122 @@ fanplot_with_series <- function(fanplot_list, sector_to_plot) {
 (fanplot_agropecuario <- fanplot_with_series(fanplots_sectores, "Agropecuario"))
 (fanplot_industrias <- fanplot_with_series(fanplots_sectores, "Industrias"))
 (fanplot_servicios <- fanplot_with_series(fanplots_sectores, "Servicios"))
-(fanplot_impuestos <- fanplot_with_series(
-  fanplots_sectores,
-  "Impuestos a la producción netos de subsidios")
-)
+(fanplot_impuestos <- fanplot_with_series(fanplots_sectores, "Impuestos a la producción netos de subsidios"))
 (fanplot_pib <- fanplot_with_series(fanplots_sectores, "Producto Interno Bruto"))
 
+plot_list <- map(
+  names(fanplots_sectores),
+  ~ fanplot_with_series(fanplots_sectores, .x)
+) |>
+  set_names(names(fanplots_sectores))
 
 (fanplot_agregacion <- fanplot_density(
   serie = by_sectores[5,][["ts"]][[1]],
   fcast_values = mean_agregado$pib,
   step_error = mean_agregado$error
 ) + 
-  geom_line(
-    data = filter(pib_sectores_outsample, str_detect(sector, "^Producto")),
-    aes(x = fecha, y = crecimiento),
-    color = "red"
-  ) +
-  scale_linetype(labels = c("Mediana", "50%", '90%')) +
-  theme_minimal() +
-  scale_fill_gradient(low = "gray19", high = "gray87") +
-  labs(
-    title = "PIB",
-    x = NULL,
-    y = "Crecimiento Interanual",
-    fill = "",
-    linetype = "Intervalos"
-  ) +
-  theme(legend.position = "bottom")
+    geom_line(
+      data = filter(pib_sectores_outsample, str_detect(sector, "^Producto")),
+      aes(x = fecha, y = crecimiento),
+      color = "red"
+    ) +
+    scale_linetype(labels = c("Mediana", "50%", '90%')) +
+    theme_minimal() +
+    scale_fill_gradient(low = "gray19", high = "gray87") +
+    labs(
+      title = "PIB",
+      x = NULL,
+      y = "Crecimiento Interanual",
+      fill = "",
+      linetype = "Intervalos"
+    ) +
+    theme(legend.position = "bottom")
 )
 
+fan_grid_by_sector <- (fanplot_agropecuario + fanplot_industrias) /
+  (fanplot_servicios + fanplot_impuestos) +
+  plot_layout(guides = 'collect') & theme(legend.position = "bottom")
+
+
+# Comparación de los errores según estrategia
+distribucion_general <-  purrr::map2(
+  as.vector(by_sectores[["fcast"]][[5]]$mean),
+  as.vector(by_sectores[["errores_rmse"]][[5]]$`Errores agregados`),
+  ~rnorm(
+    n = 1500,
+    mean = .x,
+    sd = .y
+  ) %>% 
+    as_tibble() %>% 
+    setNames("crecimiento")
+) %>% 
+  dplyr::bind_rows(.id = "horizonte") %>%
+  mutate(
+    horizonte = parse_number(horizonte),
+    origen = "Serie original"
+  )
+
+distribucion_agregado <- purrr::map2(
+  mean_agregado$pib,
+  mean_agregado$error,
+  ~rnorm(n = 1500, mean = .x, sd = .y) %>% 
+    as_tibble() %>%
+    setNames("crecimiento")
+) %>% 
+  dplyr::bind_rows(.id = "horizonte") %>% 
+  mutate(
+    horizonte = parse_number(horizonte),
+    origen = "Por agregación"
+  )
+
+(comparacion_densidad_pronostico <-  bind_rows(
+  distribucion_agregado,
+  distribucion_general
+) %>% 
+    ggplot(aes(x = crecimiento, fill = origen, y = factor(horizonte, levels = 8:1))) +
+    ggridges::geom_density_ridges(alpha = 0.6) +
+    scale_x_continuous(breaks = scales::pretty_breaks(6)) +
+    scale_fill_manual(values = c("gray61", "gray22")) +
+    labs(x = "Crecimiento", y = "Horizonte de pronóstico", fill = "Metodología") +
+    theme_plex() +
+    theme(legend.position = "bottom"))
+
+# Saving plots ------------------------------------------------------------
+
+purrr::walk(
+  names(fanplots_sectores),
+  \(sector) {
+    path <- glue::glue("graficos/forecast_2018_2019/{janitor::make_clean_names(sector)}.jpeg")
+    ggsave(
+      filename = path,
+      plot = plot_list[[sector]],
+      width = 8,
+      height = 5,
+      dpi = 350
+    )
+  }
+)
+
+ggsave(
+  "graficos/forecast_2018_2019/fan_grid_by_sector.jpeg",
+  fan_grid_by_sector,
+  width = 12,
+  height = 7.5,
+  dpi = 350
+)
+
+ggsave(
+  "graficos/forecast_2018_2019/fanplot_agregacion.jpeg",
+  fanplot_agregacion,
+  width = 8,
+  height = 5,
+  dpi = 350
+)
+
+ggsave(
+  "graficos/forecast_2018_2019/comparacion_densidad_pronostico.jpeg",
+  comparacion_densidad_pronostico,
+  height = 6,
+  width = 5,
+  dpi = 350
+)
